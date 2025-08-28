@@ -84,10 +84,7 @@ Uses **polar coordinates** to rotate and mirror pixel positions, creating symmet
 ---
 
 ## ▶️ Running the Project
-Press SPACE or click anywhere to take or retake a snapshot. Use the sliders to adjust values. Press S to save.
+Press SPACE or click anywhere to take or retake a snapshot. Use the sliders to adjust values. Press keys 0-5 to apply face detection filters.
 [Try it out -> ](https://13nz.github.io/ImageProcessing/)
 
 ---
-
-## 📄 License
-MIT License. Feel free to use and modify.
