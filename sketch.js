@@ -1,1708 +1,368 @@
-// webcam
-var capture;
+/**
+ * COMMENTARY
+ * 
+ * This project implements image processing using the user's webcam and a snapshot buffer image, using p5.js, and OOP principles.
+ * Each processed image is displayed on a grid of cells, each running a self contained pixel processing function.
+ * These include a grayscale process, color channels, color channels with threshold sliders, conversion to HSV color space, conversion to
+ * YCbCr color space, face detection, and the above color spaces with threshold sliders.
+ * The face detection process includes grayscale mode, blur, YCbCr conversion, gray pixelation, and color pixelation, which can be toggled with 
+ * keys 1-5, and 0 for the default.
+ * The user can take a snapshot using the spacebar or clicking anywhere on the canvas. 
+ * 
+ * Findings
+ * Thresholding by color behaves differently depending on the color. The red channel has more red than black when using the same value as the other colors, and makes
+ * brighter areas and skin more visible. The green channel responds better to luminance, and the blue is noisier, and responds better to shadows and cooler areas.
+ * Using thresholds with color converted images behaves differently as well. The YCbCr image has more detail and more black than the HSV. The HSV also produces 
+ * more noise and the areas where the colors change look a lot more harsh.
+ * 
+ * Problems & resolutions
+ * Webcam freeze after snapshot: after taking a snapshot the webcam view freezes and keeping a live view wasn't possible, so I kept the unedited picture in place of
+ * the webcam
+ * Face detection pixelation: I kept all the face detection processing in one function and the pixelation one was causing the progrm to freeze due to all the 
+ * nested loops required. Resolved by moving the pixelation logic in an outside loop 
+ * Sliders retaking snapshot: Because the user can take a snapshot by clicking on the canvas, adjusting the sliders caused the application to retake the picture each time. 
+ * Resolved by creating a method that checks if the  mouse click happened in the area of each slider, and only takes the snapshot if the return value is false. 
+ * All the sliders are saved in a global sliders array so the check can be done in one loop, without checking each one manually.
+ * 
+ * Schedule
+ * I managed to implement all the project requirements and the extensions before the deadline. However, if I had more time, I would add a few more extensions (I'd like
+ * to add a heatmap and a double exposure effect), a visual debug mode to avoid printing when having issues, and I would organize my code to make it more modular
+ * and have more reusable helper functions. A lot of the processes use the same loops and this could be done outside the actual pixel manipulation.
+ * 
+ * Extensions
+ * I have added 9 extensions to the project. They are placed on a grid to the right of the one with the required processes. 
+ * The extensions are:
+ * 1. Hue adjustment: produces a monochromatic picture, with the color being adjusted using a slider. I accidentally figured out
+ * this logic while attempting the color space conversion and decided to keep it as an extension.
+ * 2. Glitch effect: splits the image color channels horizontally to create a colorful glitch effect 
+ * 3. Neon glow: Using the edge detection process from the lectures, the image is turned black except the edges, which have a pastel rainbow neon effect, 
+ * changing colors vertically.
+ * 4. 8-bit color: Reduces the colors of each channel in the image to a more constrained palette, similar to old video games. 
+ * 5. Pixel Art: Applies pixelization (similar to the face detection filter) to the image, and reuses the 8-bit color process to create the effect of old 
+ * school pixel art video games.
+ * 6. Kaleidoscope: Transforms image into polar coordinates, mirrors, and converts back to cartesian coordinates, to produce a symmetrical
+ * kaleidoscope pattern
+ * 7. Film Grain: adds monochrome noise across the image to simulate the texture of film grain.
+ * 8. Halation: detects edges and adds a warm red glow, like the halation effect seen in certain kinds of film stock when capturing highlights.
+ * 9. Film Emulation: a compination of the grain and halation processes, with an added slider for white balance, to simulate the look of analog film photographs.
+ * 
+ * 
+ */
 
-// snapshot (buffer)
-var snapshot = null;
 
-// face detector
-var faceDetector;
+// SKETCH
 
-// dimensions
-// scale to 160 x 120
-const CELL_W = 160, CELL_H = 120;
+// uses constants from globals.js
+// depends on Camera class (camera.js) and Processes class (processes.js)
 
-// rows & cols (main grid)
-const ROWS = 5, COLS = 3;
-const GAP = 24;
-const MARGIN = 32;
+// camera and processes declaration
+let cam;
+let proc;
 
-const GRID_W = MARGIN * 2 + COLS * CELL_W + (COLS - 1) * GAP - 12;
-const GRID_H = MARGIN * 2 + ROWS * CELL_H + (ROWS - 1) * GAP - 12;
+let snapshot = null;
 
-// dimensions - extensions grid
-const ROWS_E = 3, COLS_E = 3;
 
-const GRID_W_E = MARGIN * 2 + COLS_E * CELL_W + (COLS_E - 1) * GAP - 12;
-const GRID_H_E = MARGIN * 2 + ROWS_E * CELL_H + (ROWS_E - 1) * GAP - 12;
 
-const E_ORIGIN_X = MARGIN + GRID_W_E + 40;
-const E_ORIGIN_Y = MARGIN;
+// processed images
+let grayscaleBrightnessImg;
 
-// image processing vars
-var grayscaleBrightnessImg = null;
+let redChannelImg;
+let greenChannelImg;
+let blueChannelImg;
 
-var redChannelImg = null;
-var greenChannelImg = null;
-var blueChannelImg = null;
+let redThresholdImg;
+let greenThresholdImg;
+let blueThresholdImg;
 
-var redThresholdImg = null;
-var greenThresholdImg = null;
-var blueThresholdImg = null;
+let hsvImg;
+let ycbcrImg;
 
-var hsvImg = null;
-var ycbcrImg = null;
+let hsvThresholdImg;
+let YCbCrThresholdImg;
 
-var hsvThresholdImg = null;
-var YCbCrThresholdImg = null;
+let faceDetectImg;
 
-var faceDetectImg = null;
+let hueImg;
+let glitchImg;
+let neonImg;
+let eightBitImg;
+let pixelArtImg;
+let kaleidoscopeImg;
+let filmGrainImg;
+let halationImg;
+let filmEmulationImg;
 
-// extension image processing vars
-var hueImg = null;
-var glitchImg = null;
-var halationImg = null;
 
-var eightBitImg = null;
-var filmGrainImg = null;
-var kaleidoscopeImg = null;
-
-var pixelArtImg = null;
-var neonImg = null;
-var filmEmulationImg = null;
 
 // sliders
-var redThresholdSlider;
-var greenThresholdSlider;
-var blueThresholdSlider;
+let redThresholdSlider, greenThresholdSlider, blueThresholdSlider;
+let hsvThresholdSlider, YCbCrThresholdSlider;
+let hueAdjustSlider, wbSlider, grainSlider, halationSlider;
+let sliders = [];
 
-var hsvThresholdSlider;
-var YCbCrThresholdSlider;
 
-var hueAdjustSlider;
-var wbSlider;
-var halationSlider;
-var grainSlider;
 
-// face effects
-var faceReplaceMode = 0
+// face mode 0 - 5
+let faceReplaceMode = 0;
 
-// keep track of sliders to handle mouse input
-var sliders = [];
+
+
+// canvas ref for accurate slider hit testing
+let cnv;
+
 
 
 function setup() {
-    createCanvas(windowWidth, windowHeight);
+    cnv = createCanvas(windowWidth, windowHeight);
     pixelDensity(1);
 
-    // initialize webcam
-    capture = createCapture(VIDEO);
+    cam = new Camera();
 
-    // hide to show manually
-    capture.hide();
 
-    // init face detector
-    faceDetector = new objectdetect.detector(
-        CELL_W, CELL_H, 1.2, objectdetect.frontalface
-    );
+    if (typeof objectdetect !== "undefined") {
+        faceDetector = new objectdetect.detector(CELL_W, CELL_H, 1.2, objectdetect.frontalface);
+    }
 
-    // setup threshold sliders
-    redThresholdSlider = createSlider(0, 255, 120);
+    proc = new Processes();
+
+
+
+    // sliders
+    redThresholdSlider   = createSlider(0, 255, 120);
     greenThresholdSlider = createSlider(0, 255, 120);
-    blueThresholdSlider = createSlider(0, 255, 120);
+    blueThresholdSlider  = createSlider(0, 255, 120);
 
-    hsvThresholdSlider = createSlider(0, 255, 120);
+    hsvThresholdSlider   = createSlider(0, 255, 120);
     YCbCrThresholdSlider = createSlider(0, 255, 120);
 
     hueAdjustSlider = createSlider(0, 255, 120);
-    wbSlider = createSlider(0, 255, 128);
-    grainSlider = createSlider(0, 10, 5);
-    halationSlider = createSlider(0, 100, 50);
+    wbSlider        = createSlider(0, 255, 128);
+    grainSlider     = createSlider(0, 10, 5);
+    halationSlider  = createSlider(0, 100, 50);
+
+
 
     sliders = [
-        redThresholdSlider,
-        greenThresholdSlider,
-        blueThresholdSlider,
-        hsvThresholdSlider,
-        YCbCrThresholdSlider,
-        hueAdjustSlider,
-        wbSlider,
-        halationSlider,
-        grainSlider
-    ]
-
-    // slider handlers
-    redThresholdSlider.input(() => reprocessThresholds());
-    greenThresholdSlider.input(() => reprocessThresholds());
-    blueThresholdSlider.input(() => reprocessThresholds());
-
-    hsvThresholdSlider.input(() => reprocessColorSpaceThresholds());
-    YCbCrThresholdSlider.input(() => reprocessColorSpaceThresholds());
-
-    hueAdjustSlider.input(() => {
-        if (!snapshot) return;
-        hueImg = processHueAdjustment(snapshot, hueAdjustSlider.value());
-    });
-
-    wbSlider.input(() => reprocessWB());
-
-    grainSlider.input(() => {
-        if (!snapshot) return;
-        filmGrainImg = processFilmGrain(snapshot, grainSlider.value() / 100);
-    })
-
-    halationSlider.input(() => {
-        if (!snapshot) return;
-        halationImg = processHalation(snapshot, halationSlider.value());
-    })
-
-    // place sliders
-    positionThresholdSliders();
-    positionColorSpaceSliders();
-
-    positionExtensionSliders();
+        redThresholdSlider, greenThresholdSlider, blueThresholdSlider,
+        hsvThresholdSlider, YCbCrThresholdSlider,
+        hueAdjustSlider, wbSlider, grainSlider, halationSlider
+    ];
 
 
+
+    // reactive reprocessing (only runs if a snapshot exists)
+    redThresholdSlider.input(reprocessThresholds);
+    greenThresholdSlider.input(reprocessThresholds);
+    blueThresholdSlider.input(reprocessThresholds);
+
+    hsvThresholdSlider.input(reprocessColorSpaceThresholds);
+    YCbCrThresholdSlider.input(reprocessColorSpaceThresholds);
+
+    hueAdjustSlider.input(() => { if (snapshot) hueImg = proc.processHueAdjustment(snapshot, hueAdjustSlider.value()); });
+    wbSlider.input(() => { if (snapshot) filmEmulationImg = proc.processFilmEmulation(snapshot, wbSlider.value()); });
+    grainSlider.input(() => { if (snapshot) filmGrainImg = proc.processFilmGrain(snapshot, grainSlider.value() / 100); });
+    halationSlider.input(() => { if (snapshot) halationImg = proc.processHalation(snapshot, halationSlider.value()); });
+
+
+
+    positionSliders();
 }
+
+
 
 function draw() {
     background(45, 68, 89);
 
-    // grid area (main)
+    // main grid background
     noStroke();
     fill(106, 122, 125);
     rect(12, 12, GRID_W, GRID_H, 12);
 
-    // row 1
-    drawCell(0, 0, "Webcam image", capture);
-    drawCell(1, 0, "Grayscale & brightness", grayscaleBrightnessImg);
-    drawCell(2, 0, "Click or press space \nto take snapshot. \n Press s to save.")
 
-    // row 2
-    drawCell(0, 1, "Red channel", redChannelImg);
-    drawCell(1, 1, "Green channel", greenChannelImg);
-    drawCell(2, 1, "Blue channel", blueChannelImg);
 
-    // row 3
-    drawCell(0, 2, "Threshold image", redThresholdImg);
-    drawCell(1, 2, "Threshold image", greenThresholdImg);
-    drawCell(2, 2, "Threshold image", blueThresholdImg);
+    // rows 1 - 5
+    drawCell(0, 0, "webcam", cam.camReady() ? cam.getFrame() : null);
+    drawCell(1, 0, "grayscale & brightness", grayscaleBrightnessImg);
+    drawCell(2, 0, "click or press space \n to take snapshot");
 
-    // row 4
-    drawCell(0, 3, "Webcam image", snapshot ? snapshot : capture);
-    drawCell(1, 3, "HSV color space", hsvImg);
-    drawCell(2, 3, "YCbCr color space", ycbcrImg);
+    drawCell(0, 1, "red channel",   redChannelImg);
+    drawCell(1, 1, "green channel", greenChannelImg);
+    drawCell(2, 1, "blue channel",  blueChannelImg);
 
-    // row 5
-    drawCell(0, 4, "Face detection", faceDetectImg);
-    drawCell(1, 4, "Threshold image \ncolor space 1", hsvThresholdImg);
-    drawCell(2, 4, "Threshold image \ncolor space 2", YCbCrThresholdImg);
+    drawCell(0, 2, "threshold image", redThresholdImg);
+    drawCell(1, 2, "threshold image", greenThresholdImg);
+    drawCell(2, 2, "threshold image", blueThresholdImg);
 
-    // grid area (extensions)
+    drawCell(0, 3, "snapshot", snapshot);
+    drawCell(1, 3, "hsv color space",   hsvImg);
+    drawCell(2, 3, "ycbcr color space", ycbcrImg);
+
+    drawCell(0, 4, "face detection", faceDetectImg);
+    drawCell(1, 4, "threshold image color space 1", hsvThresholdImg);
+    drawCell(2, 4, "threshold image color space 2", YCbCrThresholdImg);
+
+
+
+    // extension grid background
     noStroke();
     fill(106, 122, 125);
     rect(4 * 12 + GRID_W, 12, GRID_W_E, GRID_H_E, 12);
 
-    // Extensions
-    // row 1 - colorful adjustments
-    drawCell(0, 0, "Hue adjustment", hueImg, E_ORIGIN_X, E_ORIGIN_Y);
-    drawCell(1, 0, "Glitch", glitchImg, E_ORIGIN_X, E_ORIGIN_Y);
-    drawCell(2, 0, "Neon", neonImg, E_ORIGIN_X, E_ORIGIN_Y);
+    drawCell(0, 0, "hue adjustment", hueImg, E_ORIGIN_X, E_ORIGIN_Y);
+    drawCell(1, 0, "glitch",         glitchImg, E_ORIGIN_X, E_ORIGIN_Y);
+    drawCell(2, 0, "neon",           neonImg, E_ORIGIN_X, E_ORIGIN_Y);
 
-    // row 2 - effects
-    drawCell(0, 1, "8-bit color", eightBitImg, E_ORIGIN_X, E_ORIGIN_Y);
-    drawCell(1, 1, "Pixel art", pixelArtImg, E_ORIGIN_X, E_ORIGIN_Y);
-    drawCell(2, 1, "Kaleidoscope", kaleidoscopeImg, E_ORIGIN_X, E_ORIGIN_Y);
+    drawCell(0, 1, "8-bit color",  eightBitImg, E_ORIGIN_X, E_ORIGIN_Y);
+    drawCell(1, 1, "pixel art",    pixelArtImg, E_ORIGIN_X, E_ORIGIN_Y);
+    drawCell(2, 1, "kaleidoscope", kaleidoscopeImg, E_ORIGIN_X, E_ORIGIN_Y);
 
-    // row 3 - film-like processing
-    drawCell(0, 2, "Grain", filmGrainImg, E_ORIGIN_X, E_ORIGIN_Y);
-    drawCell(1, 2, "Halation", halationImg, E_ORIGIN_X, E_ORIGIN_Y);
-    drawCell(2, 2, "Film emulation", filmEmulationImg, E_ORIGIN_X, E_ORIGIN_Y);
+    drawCell(0, 2, "grain",           filmGrainImg, E_ORIGIN_X, E_ORIGIN_Y);
+    drawCell(1, 2, "halation",        halationImg, E_ORIGIN_X, E_ORIGIN_Y);
+    drawCell(2, 2, "film emulation",  filmEmulationImg, E_ORIGIN_X, E_ORIGIN_Y);
 
+
+
+    // if (!camReady() && cam && cam.drawErrorBanner) {
+    //     cam.drawErrorBanner(MARGIN, GRID_H + MARGIN * 2, GRID_W - MARGIN * 2);
+    // }
 
 }
 
 
-// -------------- Input handling functions --------------
+// positions sliders on the grid
+function positionSliders() {
+    const row3y = MARGIN + 2 * (CELL_H + GAP) + CELL_H;
+
+    redThresholdSlider.position(MARGIN, row3y);
+    greenThresholdSlider.position(MARGIN + (CELL_W + GAP), row3y);
+    blueThresholdSlider.position(MARGIN + 2 * (CELL_W + GAP), row3y);
+
+    const row5y = MARGIN + 4 * (CELL_H + GAP) + CELL_H;
+
+    hsvThresholdSlider.position(MARGIN + (CELL_W + GAP), row5y);
+    YCbCrThresholdSlider.position(MARGIN + 2 * (CELL_W + GAP), row5y);
+
+    const extY1 = MARGIN + CELL_H;
+    const extY2 = MARGIN + CELL_H + 2 * (CELL_H + GAP);
+
+    hueAdjustSlider.position(E_ORIGIN_X, extY1);
+    halationSlider.position(E_ORIGIN_X + (CELL_W + GAP), extY2);
+    wbSlider.position(E_ORIGIN_X + 2 * (CELL_W + GAP), extY2);
+    grainSlider.position(E_ORIGIN_X, extY2);
+}
+
+
 
 function mousePressed() {
-    // avoid retaking if mouse on sliders
     if (mouseOnSliders()) return;
-  // take snapshot on click
-  takeSnapshot();
+    takeSnapshot();
 }
 
-// helper to stop snapshot being retaken when user clicks on sliders
-function mouseOnSliders() {
-    for (let slider of sliders) {
-        const rect = slider.elt.getBoundingClientRect();
 
-        if (
-            mouseX >= rect.left &&
-            mouseX <= rect.right &&
-            mouseY >= rect.top &&
-            mouseY <= rect.bottom
-        ) {
-            return true
+
+// translate canvas coords to page coords before testing slider 
+function mouseOnSliders() {
+    const cbox = cnv.elt.getBoundingClientRect();
+
+    const pageX = mouseX + cbox.left;
+    const pageY = mouseY + cbox.top;
+
+    for (let s of sliders) {
+        const r = s.elt.getBoundingClientRect();
+        if (pageX >= r.left && pageX <= r.right && pageY >= r.top && pageY <= r.bottom) {
+            return true;
         }
     }
+
     return false;
 }
 
+
+
 function keyPressed() {
-    // take snapshot with SPACE
-    if (key == ' ') {
+    if (key === ' ') {
         takeSnapshot();
-    }
-    else if (key == 's') {
-        // if snapshot not empty
-        if (snapshot) {
-            // save snapshot to disk
-            save(snapshot, "snapshot.png");
-        }
-    }
-    else if (key == 'c') {
-        // clear snapshot
-        snapshot = null;
-    }
-    // face effects
-    else if (key === '0') {
-        faceReplaceMode = 0; // basic face detection
-        if (snapshot) faceDetectImg = processFaceDetect(snapshot, faceReplaceMode);
-    }
-    else if (key === '1') {
-        faceReplaceMode = 1; // grayscale 
-        if (snapshot) faceDetectImg = processFaceDetect(snapshot, faceReplaceMode);
-    }
-    else if (key === '2') {
-        faceReplaceMode = 2; // blur
-        if (snapshot) faceDetectImg = processFaceDetect(snapshot, faceReplaceMode);
-    }
-    else if (key === '3') {
-        faceReplaceMode = 3; // YCbCr
-        if (snapshot) faceDetectImg = processFaceDetect(snapshot, faceReplaceMode);
-    }
-    else if (key === '4') {
-        faceReplaceMode = 4; // pixelated (grayscale)
-        if (snapshot) faceDetectImg = processFaceDetect(snapshot, faceReplaceMode);
-    }
-    else if (key === '5') {
-        faceReplaceMode = 5; // pixelated
-        if (snapshot) faceDetectImg = processFaceDetect(snapshot, faceReplaceMode);
+
+    } else if (key >= '0' && key <= '5') {
+        faceReplaceMode = int(key);
+        if (snapshot) faceDetectImg = proc.processFaceDetect(snapshot, faceReplaceMode);
     }
 }
 
-// -------------- Helper functions --------------
 
-// takes snapshot
+// takes picture
 function takeSnapshot() {
-    // copy current webcam frame into image
+    if (!cam.camReady()) return;
+
+    const frame = cam.getFrame();
+
     if (!snapshot) {
-        snapshot = createImage(capture.width, capture.height);
+        snapshot = createImage(frame.width, frame.height);
     }
 
-    if (snapshot) {
-        snapshot.copy(
-                capture,
-                0, 0,
-                capture.width, capture.height,
-                0, 0, 
-                snapshot.width, snapshot.height
-            );
-    }
+    snapshot.copy(
+        frame,
+        0, 0,
+        frame.width, frame.height,
+        0, 0,
+        snapshot.width, snapshot.height
+    );
 
-    // when snapshot (re)taken, process all again
-    reprocessSnap();
-    
+    reprocessAll();
 }
 
-// draw each cell in grid
-function drawCell(col, row, label = "", img = null, originX = MARGIN, originY = MARGIN) {
-    const x = originX + col * (CELL_W + GAP);
-    const y = originY + row * (CELL_H + GAP);
 
-    // border (green like the mock)
-    stroke(222, 210, 164);
-    strokeWeight(3);
-    noFill();
-    rect(x, y, CELL_W, CELL_H, 6);
+// reprocess when state changes
+function reprocessAll() {
+    if (!snapshot) return;
 
-    if (img) {
-        // draw the image scaled exactly to the cell (160x120)
-        image(img, x, y, CELL_W, CELL_H);
-    } else if (label) {
-        // placeholder text centered
-        noStroke();
-        fill(30);
-        textAlign(CENTER, CENTER);
-        textSize(14);
-        text(label, x + CELL_W / 2, y + CELL_H / 2);
-    }
+    // main grid
+    grayscaleBrightnessImg = proc.processGrayscaleBright(snapshot);
+
+    redChannelImg   = proc.processRedChannel(snapshot);
+    greenChannelImg = proc.processGreenChannel(snapshot);
+    blueChannelImg  = proc.processBlueChannel(snapshot);
+
+    redThresholdImg   = proc.processThresholdChannel(snapshot, 0, redThresholdSlider.value());
+    greenThresholdImg = proc.processThresholdChannel(snapshot, 1, greenThresholdSlider.value());
+    blueThresholdImg  = proc.processThresholdChannel(snapshot, 2, blueThresholdSlider.value());
+
+    hsvImg   = proc.processHSV(snapshot);
+    ycbcrImg = proc.processYCbCr(snapshot);
+
+    faceDetectImg = proc.processFaceDetect(snapshot, faceReplaceMode);
+
+    // extension grid
+    hueImg           = proc.processHueAdjustment(snapshot, hueAdjustSlider.value());
+    glitchImg        = proc.processGlitch(snapshot);
+    neonImg          = proc.processNeon(snapshot, 50);
+    eightBitImg      = proc.process8bit(snapshot);
+    pixelArtImg      = proc.processPixelArt(snapshot, 2);
+    kaleidoscopeImg  = proc.processKaleidoscope(snapshot);
+    filmGrainImg     = proc.processFilmGrain(snapshot, grainSlider.value() / 100); // adjust value
+    halationImg      = proc.processHalation(snapshot, halationSlider.value());
+    filmEmulationImg = proc.processFilmEmulation(snapshot, wbSlider.value());
+
+    // color space thresholds last so they reflect current sliders
+    hsvThresholdImg   = proc.processHSVThreshold(snapshot,   hsvThresholdSlider.value());
+    YCbCrThresholdImg = proc.processYCbCrThreshold(snapshot, YCbCrThresholdSlider.value());
 }
 
-// draw cells for extensions
-function drawCellEx(col, row, label = "", img = null) {
-    const x = MARGIN + col * (CELL_W + GAP);
-    const y = MARGIN + row * (CELL_H + GAP);
 
-    // border (green like the mock)
-    stroke(222, 210, 164);
-    strokeWeight(3);
-    noFill();
-    rect(x, y, CELL_W, CELL_H, 6);
-
-    if (img) {
-        // draw the image scaled exactly to the cell (160x120)
-        image(img, x, y, CELL_W, CELL_H);
-    } else if (label) {
-        // placeholder text centered
-        noStroke();
-        fill(30);
-        textAlign(CENTER, CENTER);
-        textSize(14);
-        text(label, x + CELL_W / 2, y + CELL_H / 2);
-    }
-}
-
-// make correct size copy of source image
-function makeImgCopy(srcImg) {
-    var img = createImage(CELL_W, CELL_H);
-    img.copy(srcImg, 0, 0, srcImg.width, srcImg.height, 0, 0, CELL_W, CELL_H);
-
-    return img;
-}
-
-function reprocessSnap() {
-    if (!snapshot) {
-        return;
-    }
-
-    grayscaleBrightnessImg = processGrayscaleBright(snapshot);
-
-    redChannelImg = processRedChannel(snapshot);
-    greenChannelImg = processGreenChannel(snapshot);
-    blueChannelImg = processBlueChannel(snapshot);
-
-    hsvImg = processHSV(snapshot);
-    ycbcrImg = processYCbCr(snapshot);
-
-    faceDetectImg = processFaceDetect(snapshot, faceReplaceMode);
-
-    // reprocess thresholds
-    reprocessThresholds();
-    reprocessColorSpaceThresholds();
-
-    // reprocess extensions
-    hueImg = processHueAdjustment(snapshot, hueAdjustSlider.value());
-    glitchImg = processGlitch(snapshot);
-    halationImg = processHalation(snapshot);
-
-    eightBitImg = process8bit(snapshot);
-    filmGrainImg = processFilmGrain(snapshot);
-    kaleidoscopeImg = processKaleidoscope(snapshot);
-
-    pixelArtImg = processPixelArt(snapshot);
-    neonImg = processNeon(snapshot);
-    filmEmulationImg = processFilmEmulation(snapshot, wbSlider.value());
-}
 
 function reprocessThresholds() {
     if (!snapshot) return;
 
-    redThresholdImg = processThresholdChannel(snapshot, 0, redThresholdSlider.value());
-    greenThresholdImg = processThresholdChannel(snapshot, 1, greenThresholdSlider.value());
-    blueThresholdImg = processThresholdChannel(snapshot, 2, blueThresholdSlider.value());
+    redThresholdImg   = proc.processThresholdChannel(snapshot, 0, redThresholdSlider.value());
+    greenThresholdImg = proc.processThresholdChannel(snapshot, 1, greenThresholdSlider.value());
+    blueThresholdImg  = proc.processThresholdChannel(snapshot, 2, blueThresholdSlider.value());
 }
+
+
 
 function reprocessColorSpaceThresholds() {
     if (!snapshot) return;
 
-    hsvThresholdImg = processHSVThreshold(snapshot, hsvThresholdSlider.value());
-    YCbCrThresholdImg = processYCbCrThreshold(snapshot, YCbCrThresholdSlider.value());
-}
-
-function reprocessWB() {
-    filmEmulationImg = processFilmEmulation(snapshot, wbSlider.value());
-}
-
-// position threshold sliders
-function positionThresholdSliders() {
-    // row 3 - positions (0, 2), (1, 2), (2, 2)
-    var y = MARGIN + 2 * (CELL_H + GAP);
-
-    var x0  = MARGIN;
-    var x1  = MARGIN + (CELL_W + GAP);
-    var x2  = MARGIN + 2 * (CELL_W + GAP);
-
-    // place under cells
-    var offY = y + CELL_H;
-    redThresholdSlider.position(x0, offY);
-    greenThresholdSlider.position(x1, offY);
-    blueThresholdSlider.position(x2, offY);
-
-}
-
-function positionColorSpaceSliders() {
-    // row 5, index 4
-    var y = MARGIN + 4 * (CELL_H + GAP);
-    
-    var x1 = MARGIN + CELL_W + GAP;
-    var x2 = MARGIN + 2 * (CELL_W + GAP);
-
-    var offY = y + CELL_H;
-
-    hsvThresholdSlider.position(x1, offY);
-    YCbCrThresholdSlider.position(x2, offY);
-}
-
-function positionExtensionSliders() {
-    var y0 = MARGIN + CELL_H;
-    var y2 = MARGIN + CELL_H + 2 * (CELL_H + GAP);
-
-    var x0 = E_ORIGIN_X; // hue
-    var x1 = E_ORIGIN_X + CELL_W + GAP;
-    var x2 = E_ORIGIN_X + 2 * (CELL_W + GAP); // halation
-
-
-    hueAdjustSlider.position(x0, y0);
-    wbSlider.position(x2, y2);
-    grainSlider.position(x0, y2);
-    halationSlider.position(x1, y2);
-
-}
-
-// convolution helper function
-function convolution(x, y, matrix, img) {
-    matrixSize = matrix.length;
-    // calculate total of each rgb value in nieghborhood and divide by size of matrix
-    var totalRed = 0
-    var totalGreen = 0;
-    var totalBlue = 0;
-
-    var offset = floor(matrixSize / 2)
-
-    // loop thru neighborhood of pixels
-    for (var i = 0; i < matrixSize; i++) {
-        for (var j = 0; j < matrixSize; j++) {
-            // pixels to change + current coordinates - offset
-            var xLoc = x + i - offset;
-            var yLoc = y + j - offset
-
-            var index = (img.width * yLoc + xLoc) * 4;
-
-            index = constrain(index, 0, img.pixels.length - 1) // make sure in bounds
-
-            totalRed += img.pixels[index + 0] * matrix[i][j];
-            totalGreen += img.pixels[index + 1] * matrix[i][j];
-            totalBlue += img.pixels[index + 2] * matrix[i][j];
-        }
-    }
-
-    return [totalRed, totalGreen, totalBlue];
-}
-
-// pixelate helper for pixel art extension
-function pixelate(srcImg, blockSize = 4) {
-    var outImg = createImage(CELL_W, CELL_H);
-    var sizeCopy = makeImgCopy(srcImg);
-
-    sizeCopy.loadPixels();
-    outImg.loadPixels();
-
-    var src = sizeCopy.pixels;
-    var out = outImg.pixels;
-
-    var step = Math.max(1, blockSize);
-
-    for (var bx = 0; bx < CELL_W; bx += step) {
-        for (var by = 0; by < CELL_H; by += step) {
-            // avergae block color
-            var sumR = 0;
-            var sumG = 0;
-            var sumB = 0;
-            var count = 0;
-
-            for (var x = 0; x < step && (x + bx) < CELL_W; x++) {
-                for (var y = 0; y < step && (y + by) < CELL_H; y++) {
-                    var px = x + bx;
-                    var py = y + by;
-
-                    var idx = (py * CELL_W + px) * 4;
-
-                    sumR += src[idx + 0];
-                    sumG += src[idx + 1];
-                    sumB += src[idx + 2];
-
-                    count++;
-                }
-            }
-
-            // calculate average intensity
-            var avgR = Math.round(sumR / count);
-            var avgG = Math.round(sumG / count);
-            var avgB = Math.round(sumB / count);
-
-            // step 4: fill block with average intensity
-            for (var x = 0; x < step && (x + bx) < CELL_W; x++) {
-                for (var y = 0; y < step && (y + by) < CELL_H; y++) {
-                    var px = x + bx;
-                    var py = y + by;
-
-                    var idx = (py * CELL_W + px) * 4;
-
-                    out[idx + 0] = avgR;
-                    out[idx + 1] = avgG;
-                    out[idx + 2] = avgB;
-                    out[idx + 3] = 255;
-                }
-            }
-
-        }
-    }
-
-    outImg.updatePixels();
-    return outImg;
-}
-
-
-// edge detection helper
-function detectEdges(srcImg, threshold) {
-    const matrixX = [
-        [-1, 0, 1],
-        [-2, 0, 2],
-        [-1, 0, 1]
-    ];
-    const matrixY = [
-        [-1, -2, -1],
-        [ 0,  0,  0],
-        [ 1,  2,  1]
-    ];
-
-    const W = CELL_W;
-    const H = CELL_H;
-
-    const sizeCopy = makeImgCopy(srcImg);
-    const outImg = createImage(CELL_W, CELL_H);
-
-
-    sizeCopy.loadPixels();
-    outImg.loadPixels();
-
-    var out = outImg.pixels;
-
-    // edge detection
-    for (var x = 0; x < W; x++) {
-        for (var y = 0; y < H; y++) {
-            var i = (y * W + x) * 4;
-
-            var cx = convolution(x, y, matrixX, sizeCopy);
-            var cy = convolution(x, y, matrixY, sizeCopy);
-
-            // magnitude
-            var mag = Math.abs(cx[0]) + Math.abs(cy[0]);
-
-            if (mag > 1020) {
-                mag = 1020;
-            }
-
-            // scale edge gain
-            var val = (mag * 255 / 1020);
-            if (val < threshold) {
-                val = 0;
-            }
-
-            out[i + 0] = val;
-            out[i + 1] = val;
-            out[i + 2] = val;
-            out[i + 3] = 255;
-        }
-    }
-
-    outImg.updatePixels();
-
-    return outImg;
-}
-
-
-
-
-// -------------- Processing functions --------------
-
-// grayscale + brightness 20%
-function processGrayscaleBright(img) {
-    var sizeCopy = makeImgCopy(img);
-    var outImg = createImage(CELL_W, CELL_H);
-
-    sizeCopy.loadPixels();
-    outImg.loadPixels();
-
-    // loop through pixels
-    for (var x = 0; x < CELL_W; x++) {
-        for (var y = 0; y < CELL_H; y++) {
-            var index = (x + y * CELL_W) * 4;
-
-            const r = sizeCopy.pixels[index + 0];
-            const g = sizeCopy.pixels[index + 1];
-            const b = sizeCopy.pixels[index + 2];
-
-            // luma calculation
-            var gray = r * 0.299 + g * 0.587 + b * 0.114;
-
-            // brightness adjustment (20%)
-            gray *= 1.2;
-
-            // make sure in bounds
-            if (gray > 255) gray = 255;
-
-            outImg.pixels[index + 0] = gray;
-            outImg.pixels[index + 1] = gray;
-            outImg.pixels[index + 2] = gray;
-            outImg.pixels[index + 3] = 255;
-        }
-    }
-
-    outImg.updatePixels();
-
-    return outImg;
-}
-
-// color channels
-function processRedChannel(srcImg) {
-    var sizeCopy = makeImgCopy(srcImg);
-    var outImg = createImage(CELL_W, CELL_H);
-
-    sizeCopy.loadPixels();
-    outImg.loadPixels();
-
-    // loop through pixels
-    for (var x = 0; x < CELL_W; x++) {
-        for (var y = 0; y < CELL_H; y++) {
-            var index = (x + y * CELL_W) * 4;
-
-            // get only red
-            const r = sizeCopy.pixels[index + 0];
-
-            // show only red
-            outImg.pixels[index + 0] = r;
-            outImg.pixels[index + 1] = 0;
-            outImg.pixels[index + 2] = 0;
-            outImg.pixels[index + 3] = 255;
-        }
-    }
-
-    outImg.updatePixels();
-
-    return outImg;
-}
-
-
-function processGreenChannel(srcImg) {
-    var sizeCopy = makeImgCopy(srcImg);
-    var outImg = createImage(CELL_W, CELL_H);
-
-    sizeCopy.loadPixels();
-    outImg.loadPixels();
-
-    sizeCopy.loadPixels();
-    outImg.loadPixels();
-
-    // loop through pixels
-    for (var x = 0; x < CELL_W; x++) {
-        for (var y = 0; y < CELL_H; y++) {
-            var index = (x + y * CELL_W) * 4;
-
-            // get only green
-            const g = sizeCopy.pixels[index + 1];
-
-            // show only green
-            outImg.pixels[index + 0] = 0;
-            outImg.pixels[index + 1] = g;
-            outImg.pixels[index + 2] = 0;
-            outImg.pixels[index + 3] = 255;
-        }
-    }
-
-    outImg.updatePixels();
-
-    return outImg;
-}
-
-
-function processBlueChannel(srcImg) {
-    var sizeCopy = makeImgCopy(srcImg);
-    var outImg = createImage(CELL_W, CELL_H);
-
-    sizeCopy.loadPixels();
-    outImg.loadPixels();
-
-    sizeCopy.loadPixels();
-    outImg.loadPixels();
-
-    // loop through pixels
-    for (var x = 0; x < CELL_W; x++) {
-        for (var y = 0; y < CELL_H; y++) {
-            var index = (x + y * CELL_W) * 4;
-
-            // get only blue
-            const b = sizeCopy.pixels[index + 2];
-
-            // show only blue
-            outImg.pixels[index + 0] = 0;
-            outImg.pixels[index + 1] = 0;
-            outImg.pixels[index + 2] = b;
-            outImg.pixels[index + 3] = 255;
-        }
-    }
-
-    outImg.updatePixels();
-
-    return outImg;
-}
-
-// reusable process thresholds function
-function processThresholdChannel(srcImg, channelIndex, val) {
-    const sizeCopy = makeImgCopy(srcImg); // 160x120
-    const outImg = createImage(CELL_W, CELL_H);
-
-    sizeCopy.loadPixels();
-    outImg.loadPixels();
-
-    for (let y = 0; y < CELL_H; y++) {
-        for (let x = 0; x < CELL_W; x++) {
-        const index = (y * CELL_W + x) * 4;
-
-        const value = sizeCopy.pixels[index + channelIndex]; // 0=R,1=G,2=B
-        const v = (value >= val) ? 255 : 0;
-
-        outImg.pixels[index + 0] = channelIndex == 0 ? v : 0;
-        outImg.pixels[index + 1] = channelIndex == 1 ? v : 0;
-        outImg.pixels[index + 2] = channelIndex == 2 ? v : 0;
-        outImg.pixels[index + 3] = 255;
-        }
-    }
-
-    outImg.updatePixels();
-    return outImg;
-}
-
-// HSV color space
-function processHSV(srcImg) {
-    const sizeCopy = makeImgCopy(srcImg); 
-    const outImg = createImage(CELL_W, CELL_H);
-
-    sizeCopy.loadPixels();
-    outImg.loadPixels();
-
-    for (let y = 0; y < CELL_H; y++) {
-        for (let x = 0; x < CELL_W; x++) {
-        const index = (y * CELL_W + x) * 4;
-
-        // R,G,B values divided by 255 to change the range from 0..255 to 0..1
-
-        const r = sizeCopy.pixels[index + 0];
-        const g = sizeCopy.pixels[index + 1];
-        const b = sizeCopy.pixels[index + 2];
-
-        var hsv = RGBtoHSV(r, g, b);
-        var rgb  = HSVtoRGB(hsv[0], 1, 1); // pass only hue
-
-        outImg.pixels[index + 0] = rgb[0];
-        outImg.pixels[index + 1] = rgb[1];
-        outImg.pixels[index + 2] = rgb[2];
-        outImg.pixels[index + 3] = 255;
-        }
-    }
-
-    outImg.updatePixels();
-    return outImg;
-}
-
-
-// YCbCr color space
-function processYCbCr(srcImg) {
-    var sizeCopy = makeImgCopy(srcImg);
-    var outImg = createImage(CELL_W, CELL_H);
-
-    sizeCopy.loadPixels();
-    outImg.loadPixels();
-
-    // loop through pixels
-    for (var x = 0; x < CELL_W; x++) {
-        for (var y = 0; y < CELL_H; y++) {
-            var index = (x + y * CELL_W) * 4;
-
-            const r = sizeCopy.pixels[index + 0];
-            const g = sizeCopy.pixels[index + 1];
-            const b = sizeCopy.pixels[index + 2];
-
-            var Y = 0.299 * r + 0.587 * g + 0.114 * b;
-            var Cb = -0.168736 * r - 0.331264 * g + 0.5 * b + 128;
-            var Cr = 0.5 * r - 0.418688 * g - 0.081312 * b + 128;
-
-            // clamp to 255
-            Y = Y < 0 ? 0 : Y > 255 ? 255: Y;
-            Cb = Cb < 0 ? 0 : Cb > 255 ? 255: Cb;
-            Cr = Cr < 0 ? 0 : Cr > 255 ? 255: Cr;
-
-            outImg.pixels[index + 0] = Y;
-            outImg.pixels[index + 1] = Cb;
-            outImg.pixels[index + 2] = Cr;
-            outImg.pixels[index + 3] = 255;
-        }
-    }
-
-    outImg.updatePixels();
-
-    return outImg;
-}
-
-// HSV helper functions
-// input: rgb, outpus: h in degrees, v, s (travis)
-function RGBtoHSV(r, g, b) {
-    // normalize
-    r /= 255;
-    g /= 255;
-    b /= 255;
-
-    var maxC = Math.max(r, g, b);
-    var minC = Math.min(r, g, b);
-    var d = maxC - minC;
-
-    // saturation & value
-    var v = maxC;
-    var s = maxC === 0 ? 0 : d / maxC;
-
-    // hue
-    var h = 0;
-
-    if (s !== 0) {
-        var red = ( maxC - r) / d;
-        var green = ( maxC - g) / d;
-        var blue = ( maxC - b) / d;
-
-        var hue;
-
-        if (r === maxC && g === minC) {
-            hue = 5 + blue;
-        }
-        else if (r === maxC && g !== minC) {
-            hue = 1 - green;
-        }
-        else if (g === maxC && b === minC) {
-            hue = red + 1;
-        }
-        else if (g === maxC && b !== minC) {
-            hue = 3 - blue;
-        }
-        else if (b === maxC && r === minC) {
-            hue = 3 + green;
-        }
-        else {
-            hue = 5 - red;
-        }
-
-        h = (hue * 60) % 360
-
-        if (h < 0) {
-            h += 360;
-        }
-    }
-
-    // return in order
-    // 0-360, 0-1, 0-1
-    return [h, s, v];
-}
-
-
-// covert HSV back to RGB (travis)
-function HSVtoRGB(h, s, v) {
-    if (s === 0) {
-        var val = Math.round(v * 255);
-        return [val, val, val];
-    }
-
-    var hex = h / 60;
-    var primary = Math.floor(hex);
-    var secondary = hex - primary;
-
-    var A = (1 - s) * v;
-    var B = (1 - (s * secondary)) * v;
-    var C = (1 - (s * (1 - secondary))) * v;
-
-    var r = 0, g = 0, b = 0;
-
-    switch(primary) {
-        case 0:
-            r = v;
-            g = C;
-            b = A;
-            break;
-        case 1:
-            r = B;
-            g = v;
-            b = A;
-            break;
-        case 2:
-            r = A;
-            g = v;
-            b = C;
-            break;
-        case 3:
-            r = A;
-            g = B;
-            b = v;
-            break;
-        case 4:
-            r = C;
-            g = A;
-            b = v;
-            break;
-        case 5:
-            r = v;
-            g = A;
-            b = B;
-            break;
-        default:
-            break;
-    }
-
-    return [Math.round(r * 255), Math.round(g * 255), Math.round(b * 255)];
-}
-
-// color space thresholds
-
-function processHSVThreshold(srcImg, val) {
-    const sizeCopy = makeImgCopy(srcImg), 
-    outImg = createImage(CELL_W, CELL_H);
-
-    sizeCopy.loadPixels(); 
-    outImg.loadPixels();
-
-
-    for (let y = 0; y < CELL_H; y++) {
-        for (let x = 0; x < CELL_W; x++) {
-            const index = (y * CELL_W + x) * 4;
-            const r = sizeCopy.pixels[index + 0];
-            const g = sizeCopy.pixels[index + 1];
-            const b = sizeCopy.pixels[index + 2];
-
-            var [h, s, v] = RGBtoHSV(r, g, b); 
-
-            if (v >= val / 255) {
-                // Keep same HSV color
-                const [r, g, b] = HSVtoRGB(h, 1, 1);
-                outImg.pixels[index + 0] = r;
-                outImg.pixels[index + 1] = g;
-                outImg.pixels[index + 2] = b;
-            } else {
-                // Below threshold → black
-                outImg.pixels[index + 0] = 0;
-                outImg.pixels[index + 1] = 0;
-                outImg.pixels[index + 2] = 0;
-            }
-            outImg.pixels[index + 3] = 255;
-        }
-    }
-    outImg.updatePixels();
-    return outImg;
-}
-
-
-
-function processYCbCrThreshold(srcImg, val /* 0..255 */) {
-    const sized = makeImgCopy(srcImg);
-    const out   = createImage(CELL_W, CELL_H);
-
-    sized.loadPixels();
-    out.loadPixels();
-
-    for (let y = 0; y < CELL_H; y++) {
-        for (let x = 0; x < CELL_W; x++) {
-            const idx = (y * CELL_W + x) * 4;
-
-            const r = sized.pixels[idx + 0];
-            const g = sized.pixels[idx + 1];
-            const b = sized.pixels[idx + 2];
-
-            // Convert to YCbCr
-            let Y  = 0.299 * r + 0.587 * g + 0.114 * b;
-            let Cb = -0.168736 * r - 0.331264 * g + 0.5 * b + 128;
-            let Cr = 0.5 * r - 0.418688 * g - 0.081312 * b + 128;
-
-            // Clamp
-            Y  = Math.min(Math.max(Y, 0), 255);
-            Cb = Math.min(Math.max(Cb, 0), 255);
-            Cr = Math.min(Math.max(Cr, 0), 255);
-
-            if (Y >= val) {
-                // keep YCbCr as RGB-like triplet for visualization
-                out.pixels[idx + 0] = Y;
-                out.pixels[idx + 1] = Cb;
-                out.pixels[idx + 2] = Cr;
-            } else {
-                // black
-                out.pixels[idx + 0] = 0;
-                out.pixels[idx + 1] = 0;
-                out.pixels[idx + 2] = 0;
-            }
-
-            out.pixels[idx + 3] = 255;
-        }
-    }
-
-    out.updatePixels();
-    return out;
-}
-
-
-
-
-// face detection
-function processFaceDetect(srcImg, mode = 0) {
-    var faceImg = createImage(CELL_W, CELL_H);
-    faceImg.copy(srcImg, 0, 0, srcImg.width, srcImg.height, 0, 0, CELL_W, CELL_H);
-
-    // get faces
-    var faces = faceDetector.detect(faceImg.canvas) || [];
-
-    // output image
-    var outImg = createImage(CELL_W, CELL_H);
-    outImg.copy(faceImg, 0, 0, CELL_W, CELL_H, 0, 0, CELL_W, CELL_H);
-
-    faceImg.loadPixels();
-    outImg.loadPixels();
-
-    for (var i = 0; i < faceImg.pixels.length; i++) {
-        outImg.pixels[i] = faceImg.pixels[i];
-    }
-
-    // process modes
-    if (mode !== 0) {
-        for (let i = 0; i < faces.length; i++) {
-            const f = faces[i]; // [x, y, w, h, conf]
-            if (f[4] <= 4) continue;
-
-            const x0 = Math.max(0, Math.floor(f[0]));
-            const y0 = Math.max(0, Math.floor(f[1]));
-            const x1 = Math.min(CELL_W,  Math.ceil(f[0] + f[2]));
-            const y1 = Math.min(CELL_H,  Math.ceil(f[1] + f[3]));
-
-            // two pixelated modes
-            // 4 -> grayscale
-            // 5 -> color
-            if (mode === 4) {
-                // step 1: grayscale
-                for (var x = x0; x < x1; x++) {
-                        for (var y = y0; y < y1; y++ ) {
-                            const index = (y * CELL_W + x) * 4;
-                            const r = outImg.pixels[index + 0];
-                            const g = outImg.pixels[index + 1];
-                            const b = outImg.pixels[index + 2];
-
-                            // same logic as greyscale filter
-                            let v = 0.299 * r + 0.587 * g + 0.114 * b;
-                            v = Math.min(255, v * 1.2) | 0;
-
-                            outImg.pixels[index + 0] = v;
-                            outImg.pixels[index + 1] = v;
-                            outImg.pixels[index + 2] = v;
-                            outImg.pixels[index + 3] = 255;
-                        }
-                    }
-
-                // step 2: loop thru 5x5 blocks
-                const blockSize = 5;
-
-                for (var bx = x0; bx < x1; bx += blockSize) {
-                    for (var by = y0; by < y1; by += blockSize) {
-                        // step 3: calculate average grayscale intensity
-                        var sum = 0;
-                        var count = 0;
-
-                        for (var x = 0; x < blockSize && (x + bx) < x1; x++) {
-                            for (var y = 0; y < blockSize && (y + by) < y1; y++) {
-                                var px = x + bx;
-                                var py = y + by;
-
-                                var idx = (py * CELL_W + px) * 4;
-
-                                sum += outImg.pixels[idx];
-                                count++;
-                            }
-                        }
-
-                        // calculate average intensity
-                        var avg = Math.round(sum / count);
-
-                        // step 4: fill block with average intensity
-                        for (var x = 0; x < blockSize && (x + bx) < x1; x++) {
-                            for (var y = 0; y < blockSize && (y + by) < y1; y++) {
-                                var px = x + bx;
-                                var py = y + by;
-
-                                var idx = (py * CELL_W + px) * 4;
-
-                                outImg.pixels[idx + 0] = avg;
-                                outImg.pixels[idx + 1] = avg;
-                                outImg.pixels[idx + 2] = avg;
-                                outImg.pixels[idx + 3] = 255;
-                            }
-                        }
-                    }
-                }
-            }
-            else if (mode === 5) {
-                // step 2: loop thru 5x5 blocks
-                const blockSize = 5;
-
-                for (var bx = x0; bx < x1; bx += blockSize) {
-                    for (var by = y0; by < y1; by += blockSize) {
-                        // step 3: calculate average  intensity for each color
-                        var sumR = 0;
-                        var sumG = 0;
-                        var sumB = 0;
-
-                        var count = 0;
-
-                        for (var x = 0; x < blockSize && (x + bx) < x1; x++) {
-                            for (var y = 0; y < blockSize && (y + by) < y1; y++) {
-                                var px = x + bx;
-                                var py = y + by;
-
-                                var idx = (py * CELL_W + px) * 4;
-
-                                sumR += outImg.pixels[idx + 0];
-                                sumG += outImg.pixels[idx + 1];
-                                sumB += outImg.pixels[idx + 2];
-
-                                count++;
-                            }
-                        }
-
-                        // calculate average intensity
-                        var avgR = Math.round(sumR / count);
-                        var avgG = Math.round(sumG / count);
-                        var avgB = Math.round(sumB / count);
-
-                        // step 4: fill block with average intensity
-                        for (var x = 0; x < blockSize && (x + bx) < x1; x++) {
-                            for (var y = 0; y < blockSize && (y + by) < y1; y++) {
-                                var px = x + bx;
-                                var py = y + by;
-
-                                var idx = (py * CELL_W + px) * 4;
-
-                                outImg.pixels[idx + 0] = avgR;
-                                outImg.pixels[idx + 1] = avgG;
-                                outImg.pixels[idx + 2] = avgB;
-                                outImg.pixels[idx + 3] = 255;
-                            }
-                        }
-                    }
-                }
-            }
-            else {
-
-                for (var x = x0; x < x1; x++) {
-                    for (var y = y0; y < y1; y++ ) {
-                        const index = (y * CELL_W + x) * 4;
-                        const r = outImg.pixels[index + 0];
-                        const g = outImg.pixels[index + 1];
-                        const b = outImg.pixels[index + 2];
-
-                        if (mode === 1) {
-                            // same logic as greyscale filter
-                            let v = 0.299 * r + 0.587 * g + 0.114 * b;
-                            v = Math.min(255, v * 1.2) | 0;
-
-                            outImg.pixels[index + 0] = v;
-                            outImg.pixels[index + 1] = v;
-                            outImg.pixels[index + 2] = v;
-                            outImg.pixels[index + 3] = 255;
-                        }
-
-                        else if (mode === 2) {
-                            var matrix = [
-                                [1/16, 2/16, 1/16],
-                                [2/16, 4/16, 2/16],
-                                [1/16, 2/16, 1/16]
-                            ]; // sum == 1
-
-                            var c = convolution(x, y, matrix, outImg);
-
-                            outImg.pixels[index + 0] = c[0] 
-                            outImg.pixels[index + 1] = c[1]
-                            outImg.pixels[index + 2] = c[2]
-                            outImg.pixels[index + 3] = 255
-                        }
-                        // YCbCr mode
-                        else if (mode === 3) {
-                            var Y = 0.299 * r + 0.587 * g + 0.114 * b;
-                            var Cb = -0.168736 * r - 0.331264 * g + 0.5 * b + 128;
-                            var Cr = 0.5 * r - 0.418688 * g - 0.081312 * b + 128;
-
-                            // clamp to 255
-                            Y = Y < 0 ? 0 : Y > 255 ? 255: Y;
-                            Cb = Cb < 0 ? 0 : Cb > 255 ? 255: Cb;
-                            Cr = Cr < 0 ? 0 : Cr > 255 ? 255: Cr;
-
-                            outImg.pixels[index + 0] = Y;
-                            outImg.pixels[index + 1] = Cb;
-                            outImg.pixels[index + 2] = Cr;
-                            outImg.pixels[index + 3] = 255;
-                        }
-                    }
-                }
-            }
-        }
-    }
-    
-
-    outImg.updatePixels();
-
-    // draw rectangles
-    const ctx = outImg.drawingContext;
-    ctx.save();
-    ctx.lineWidth = 2;
-    ctx.strokeStyle = 'rgba(255,255,255,1)';
-    ctx.fillStyle = 'rgba(240, 239, 175, 0)';
-
-    for (let i = 0; i < faces.length; i++) {
-        const f = faces[i]; // [x, y, w, h, conf]
-        if (f[4] > 4) {
-            ctx.strokeRect(f[0], f[1], f[2], f[3]);
-            ctx.fillRect(f[0], f[1], f[2], f[3]);
-        }
-    }
-    ctx.restore();
-
-    outImg.loadPixels(); 
-    outImg.updatePixels();
-    return outImg;
-}
-
-
-// ----------------- Extension methods -------------------
-
-// Hue Adjustment
-function processHueAdjustment(srcImg, val) {
-    const sizeCopy = makeImgCopy(srcImg);
-    const outImg = createImage(CELL_W, CELL_H);
-
-    sizeCopy.loadPixels();
-    outImg.loadPixels();
-
-
-    for (let y = 0; y < CELL_H; y++) {
-        for (let x = 0; x < CELL_W; x++) {
-            const idx = (y * CELL_W + x) * 4;
-
-            const r = sizeCopy.pixels[idx + 0];
-            const g = sizeCopy.pixels[idx + 1];
-            const b = sizeCopy.pixels[idx + 2];
-
-            let [h, s, v] = RGBtoHSV(r, g, b); 
-            // override hue with slider
-            h = map(val, 0, 255, 0, 360);
-
-            const [R, G, B] = HSVtoRGB(h, s, v);
-            outImg.pixels[idx + 0] = R;
-            outImg.pixels[idx + 1] = G;
-            outImg.pixels[idx + 2] = B;
-            outImg.pixels[idx + 3] = 255;
-        }
-    }
-
-    outImg.updatePixels();
-    return outImg;
-}
-
-// Glitch/VHS effect
-function processGlitch(srcImg) {
-    var rdx = 6, rdy = 0; // red offset
-    var gdx = 0, gdy = 0; // green offset
-    var bdx = -6, bdy = 0; // blue offset
-
-    const sizeCopy = makeImgCopy(srcImg);
-    const outImg = createImage(CELL_W, CELL_H);
-
-    // clamp helper
-    const clamp = (v, lo, hi) => (v < lo ? lo : (v > hi ? hi : v));
-
-    sizeCopy.loadPixels();
-    outImg.loadPixels();
-
-    src = sizeCopy.pixels;
-    out = outImg.pixels;
-
-    // chromatic split + jitter + scanlines
-    for (var x = 0; x < CELL_W; x++) {
-        for (var y = 0; y < CELL_H; y++) {
-            var idx = (x + CELL_W * y) * 4;
-
-            var rx = clamp(x + rdx, 0, CELL_W - 1);
-            var gx = clamp(x + gdx, 0, CELL_W - 1);
-            var bx = clamp(x + bdx, 0, CELL_W - 1);
-            var ry = clamp(y + rdy, 0, CELL_H - 1);
-            var gy = clamp(y + gdy, 0, CELL_H - 1);
-            var by = clamp(y + bdy, 0, CELL_H - 1);
-
-            // get index for each color
-            var idxR = (ry * CELL_W + rx) * 4;
-            var idxG = (gy * CELL_W + gx) * 4;
-            var idxB = (by * CELL_W + bx) * 4;
-
-
-            out[idx + 0] = (src[idxR + 0] ); // shifted red
-            out[idx + 1] = (src[idxG + 1] ); // shifted red
-            out[idx + 2] = (src[idxB + 2] ); // shifted red
-
-            out[idx + 3] = 255;
-        }
-    }
-
-    // vertical bleed
-    outImg.updatePixels();
-    return outImg;
-
-}
-
-
-// Halation effect
-function processHalation(srcImg, edgeThr = 50) {
-    const matrixX = [
-        [-1, 0, 1],
-        [-2, 0, 2],
-        [-1, 0, 1]
-    ];
-    const matrixY = [
-        [-1, -2, -1],
-        [ 0,  0,  0],
-        [ 1,  2,  1]
-    ];
-
-    //var edgeThr = 50; // edge threshold 
-    var edgeGain = 1.0; // multiply edge magnitude (0..2)
-    var strength = 0.7; // overall glow strength (0..1)
-    var radius = 3;   // blur radius in pixels
-    var passes = 2;   // blur passes (2–3 = softer)
-    var blurPass = 1; // soften edges
-
-    // warm tint multipliers
-    var warmR = 1.0;
-    var warmG = 0.1;
-    var warmB  = 0.1;
-
-    const W = CELL_W;
-    const H = CELL_H;
-
-    const sizeCopy = makeImgCopy(srcImg);
-    const outImg = createImage(CELL_W, CELL_H);
-
-    // use helper to detect edges
-    var edgeImg = detectEdges(srcImg);
-
-    sizeCopy.loadPixels();
-    outImg.loadPixels();
-    edgeImg.loadPixels();
-
-    var src = sizeCopy.pixels;
-    var out = outImg.pixels;
-    var edge = edgeImg.pixels;
-
-
-    // add halation on edges
-    for (var x = 0; x < W; x++) {
-        for (var y = 0; y < H; y++) {
-            var i = (y * W + x) * 4;
-            edgeVal = edge[i];
-
-            // glow mask strength
-            var m = (edgeVal - edgeThr) / (255 - edgeThr);
-
-            // normalize 0-1
-            if (m < 0) {
-                m = 0;
-            }
-            else if (m > 1) {
-                m = 1;
-            }
-
-            m *= strength;
-
-            var r = src[i + 0] + 255 * m * warmR;
-            var g = src[i + 1] + 255 * m * warmG;
-            var b = src[i + 2] + 255 * m * warmB;
-
-            out[i + 0] = r > 255 ? 255 : r;
-            out[i + 1] = g > 255 ? 255 : g;
-            out[i + 2] = b > 255 ? 255 : b;
-
-            out[i + 3] = 255;
-        }
-    }
-
-    outImg.updatePixels();
-    return outImg;
-}
-
-// 8-bit color effect
-function process8bit(srcImg) {
-    // reduce number of available colors per channel
-    const levels = 8;
-    var step = 255 / (levels - 1); // color steps per channel
-
-    var outImg = createImage(CELL_W, CELL_H);
-    var sizeCopy = makeImgCopy(srcImg);
-
-    sizeCopy.loadPixels();
-    outImg.loadPixels();
-
-    var src = sizeCopy.pixels;
-    var out = outImg.pixels;
-
-    for (var i = 0; i < src.length; i += 4) {
-        // quantize each channel
-        out[i + 0] = Math.round(src[i +  0] / step) * step;
-        out[i + 1] = Math.round(src[i +  1] / step) * step;
-        out[i + 2] = Math.round(src[i +  2] / step) * step;
-
-        out[i + 3] = 255;
-    }
-
-
-    outImg.updatePixels();
-    return outImg;
-
-}
-
-// Film grain effect
-function processFilmGrain(srcImg, amount = 0.08) {
-    var outImg = createImage(CELL_W, CELL_H);
-    var sizeCopy = makeImgCopy(srcImg);
-
-    sizeCopy.loadPixels();
-    outImg.loadPixels();
-
-    var src = sizeCopy.pixels;
-    var out = outImg.pixels;
-
-    var scale = amount * 255;
-
-    for (var i = 0; i < src.length; i+= 4) {
-        var r = src[i + 0];
-        var g = src[i + 1];
-        var b = src[i + 2];
-
-        var luma = 0.299 * r + 0.587 * g + 0.114 * b;
-
-        // monochrome noise [-1, 1]
-        var noise = Math.random() * 2 - 1;
-        var l2 = luma + noise * scale;
-
-        // rescale rgb to keep color ratios
-        var k = luma > 0 ? (l2 / luma) : 1.0;
-
-        r = Math.max(0, Math.min(255, r * k));
-        g = Math.max(0, Math.min(255, g * k));
-        b = Math.max(0, Math.min(255, b * k));
-
-        out[i + 0] = r;
-        out[i + 1] = g;
-        out[i + 2] = b;
-
-        out[i + 3] = 255;
-    }
-
-    outImg.updatePixels();
-    return outImg;
-}
-
-
-// Kaleidoscope effect
-function processKaleidoscope(srcImg, segments = 4) {
-    var outImg = createImage(CELL_W, CELL_H);
-    var sizeCopy = makeImgCopy(srcImg);
-
-    sizeCopy.loadPixels();
-    outImg.loadPixels();
-
-    var src = sizeCopy.pixels;
-    var out = outImg.pixels;
-
-    var cx = CELL_W / 2;
-    var cy = CELL_H / 2;
-
-    const radius = Math.min(cx, cy);
-    const angle = TWO_PI / segments;
-
-     for (var x = 0; x < CELL_W; x++) {
-        for (var y = 0; y < CELL_H; y++) {
-            // coords relative to center
-            var dx = x - cx;
-            var dy = y - cy;
-
-            // polar coords
-            var r = Math.sqrt(dx * dx + dy * dy);
-            var theta = Math.atan2(dy, dx);
-
-            // wrap and mirror
-            theta = ((theta % angle) + angle) % angle;
-            if (theta > angle / 2) {
-                theta = angle - theta;
-            }
-
-            // convert to cartesian coords
-            var sx = Math.floor(cx + r * Math.cos(theta));
-            var sy = Math.floor(cy + r * Math.sin(theta));
-
-            // clamp in bounds
-            sx = Math.max(0, Math.min(CELL_W - 1, sx));
-            sy = Math.max(0, Math.min(CELL_H - 1, sy));
-
-            var srcIdx = (sy * CELL_W + sx) * 4;
-            var outIdx = (y * CELL_W + x) * 4;
-
-            out[outIdx + 0] = src[srcIdx + 0];
-            out[outIdx + 1] = src[srcIdx + 1];
-            out[outIdx + 2] = src[srcIdx + 2];
-
-            out[outIdx + 3] = 255;
-        }
-    }
-    
-
-    outImg.updatePixels();
-    return outImg;
-}
-
-
-// Pixel art effect
-function processPixelArt(srcImg, blockSize = 2, levels = 8, sample = "avg") {
-    // pixelate image
-    var pixelated = pixelate(srcImg, blockSize);
-
-    // apply 8bit quantization
-    return process8bit(pixelated, levels);
-}
-
-
-// Neon effect
-function processNeon(srcImg) {
-    // vertical neon raingow glow
-    // hue varies by y 
-    var outImg = createImage(CELL_W, CELL_H);
-    var sizeCopy = makeImgCopy(srcImg);
-
-    var edgeThreshold = 80;
-    var strength = 2;
-    var sat = 0.35;
-    var bright = 1.0;
-    var gamma = 1.5;
-
-    // edge detection
-    var edges = detectEdges(sizeCopy, edgeThreshold);
-
-    sizeCopy.loadPixels();
-    outImg.loadPixels();
-    edges.loadPixels();
-
-    var src = sizeCopy.pixels;
-    var out = outImg.pixels;
-    var epx = edges.pixels;
-
-    var W = CELL_W;
-    var H = CELL_H;
-    
-
-
-
-    for (var y = 0; y < H; y++) {
-        // pastel rainbow colors
-        var h = (y / (H - 1)) * 360;
-        var [rC, gC, bC] = HSVtoRGB(h, sat, bright);
-
-        for (var x = 0; x < W; x++) {
-            var i = (y * W + x) * 4;
-
-            // scale edges mask by strength
-            var m = (epx[i] / 255);
-            m = Math.pow(m, gamma) * strength;
-
-            // clamp m
-            if (m < 0.001) {
-                m = 0;
-            }
-
-            if (m > 1) {
-                m = 1;
-            }
-
-            // assign pixels
-            out[i + 0] = rC * m;
-            out[i + 1] = gC * m;
-            out[i + 2] = bC * m;
-
-            out[i + 3] = 255;
-        }
-    }
-
-    outImg.updatePixels();
-
-    return outImg;
-
-}
-
-
-// Film emulation effect
-function processFilmEmulation(srcImg, wb = 50) {
-    // white balance
-    // 128: neutral
-    // wb > 128: warm
-    // wb < 128: cool
-
-    // map wb to -1...+1
-    wb = map(wb, 0, 255, -1, 1);
-
-    const sizeCopy = makeImgCopy(srcImg);
-    const outImg = createImage(CELL_W, CELL_H);
-
-
-    sizeCopy.loadPixels();
-    outImg.loadPixels();
-
-    var src = sizeCopy.pixels;
-    var out = outImg.pixels;
-   
-    // channel gains
-    var rGain;
-    var gGain;
-    var bGain;
-
-    if (wb >= 0) {
-        // warm - increase red + green
-        rGain = 1 + 0.25 * wb;
-        gGain = 1 + 0.1 * wb;
-        bGain = 1 - 0.2 * wb;
-    }
-    else {
-        // cool - increase blue
-        rGain = 1 + 0.25 * wb;   
-        gGain = 1 + 0.1 * wb;  
-        bGain = 1 - 0.2 * wb; 
-    }
-
-    // process white balance
-    for (var i = 0; i < src.length; i += 4) {
-        var r = src[i + 0] * rGain;
-        var g = src[i + 1] * gGain;
-        var b = src[i + 2] * bGain;
-
-        // clamp 
-        out[i + 0] = r > 255 ? 255 : r < 0 ?  0 : r;
-        out[i + 1] = g > 255 ? 255 : g < 0 ?  0 : g;
-        out[i + 2] = b > 255 ? 255 : b < 0 ?  0 : b;
-
-        out[i + 3] = 255;
-    }
-
-    outImg.updatePixels();
-
-    // apply halation
-    var halation = processHalation(outImg);
-
-    // apply grain
-    var grain = processFilmGrain(halation);
-    
-
-    return grain;
+    hsvThresholdImg   = proc.processHSVThreshold(snapshot,   hsvThresholdSlider.value());
+    YCbCrThresholdImg = proc.processYCbCrThreshold(snapshot, YCbCrThresholdSlider.value());
 }
