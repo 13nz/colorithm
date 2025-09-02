@@ -1,4 +1,4 @@
-# 🎨 Image Processing
+# 🎨 Colorithm
 
 **Image Processing** is an interactive browser-based application that applies real-time filters, transformations, and special effects to images and snapshots.  
 It features a grid-based interface for selecting different modes, face detection filters, and creative extensions — all running in the browser with JavaScript and p5.js.  
