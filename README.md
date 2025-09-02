@@ -3,6 +3,8 @@
 **Image Processing** is an interactive browser-based application that applies real-time filters, transformations, and special effects to images and snapshots.  
 It features a grid-based interface for selecting different modes, face detection filters, and creative extensions — all running in the browser with JavaScript and p5.js.  
 
+<img width="1211" height="756" alt="image" src="https://github.com/user-attachments/assets/c50e9af3-f980-482f-b43b-b704680870a3" />
+
 ---
 
 ## 🚀 Features
